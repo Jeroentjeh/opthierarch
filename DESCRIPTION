@@ -1,0 +1,15 @@
+Package: optHierarch
+Type: Package
+Title: Hiearchical clustering with optimised Gower's metric's weights
+Version: 0.1
+Authors@R: person("Jeroen", "van den Hoven", email = "jeroenhoven@gmail.com", role = c("aut", "cre"))
+Description: 
+	The functions in this package optimise the cophenetic 
+	correlation coefficient by changing the weights of Gower's metric's 
+	for a hierarchical clustering algorithm.
+License: MIT + file LICENSE
+Depends: R (>= 3.2.3)
+Imports:
+	cluster (>= 2.0.3)
+Suggests:
+    parallel
