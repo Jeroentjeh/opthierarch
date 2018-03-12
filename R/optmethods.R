@@ -1,31 +1,17 @@
-gower_diff <- function(col){
-    if(is.numeric(col) || is.logical(col)){
-        c_min = min(col, na.rm = T)
-        c_max = max(col, na.rm = T)
-        # col <- (col - c_min) / (c_max - c_min)
-        #Equal to daisy result if rescaling is not applied
-        distances <- sapply(col, function(y) abs(y-col)) / (c_max - c_min)
-    }else{
-        distances <- sapply(col, function(y) y != col)
-    }
-    return(distances[lower.tri(distances)])
-}
-
 calculate_cpcc = function(x, var_list){
+    message('run fn...')
+
     if (1 - sum(x) < var_list$bounds[1] || 1 - sum(x) > var_list$bounds[2]) return(0)
     data = var_list$data
     method = var_list$method
     dist_matrix = cluster::daisy(data, metric = "gower", weights = c(x, 1 - sum(x)))
-    correlation = 0
-
-    message('run fn...')
 
     #CHECK IF THERE ARE NO PROBLEMS WITH THE DISTANCE MATRIX
     if (!any(is.na(dist_matrix))){
         correlation = -cor(dist_matrix, cophenetic(hclust(dist_matrix, method = method)))
-    }
-    #print(correlation)
-    correlation
+    } else correlation = 0
+
+    return(correlation)
 }
 
 cpcc_derivative = function(x, var_list){
