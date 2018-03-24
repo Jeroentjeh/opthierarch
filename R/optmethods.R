@@ -1,10 +1,9 @@
 calculate_cpcc = function(x, var_list){
     message('run fn...')
 
-    if (1 - sum(x) < var_list$bounds[1] || 1 - sum(x) > var_list$bounds[2]) return(0)
     data = var_list$data
     method = var_list$method
-    dist_matrix = cluster::daisy(data, metric = "gower", weights = c(x, 1 - sum(x)))
+    dist_matrix = cluster::daisy(data, metric = "gower", weights = x)
 
     #CHECK IF THERE ARE NO PROBLEMS WITH THE DISTANCE MATRIX
     if (!any(is.na(dist_matrix))){
@@ -15,10 +14,9 @@ calculate_cpcc = function(x, var_list){
 }
 
 cpcc_derivative = function(x, var_list){
-    if (1 - sum(x) < var_list$bounds[1] || 1 - sum(x) > var_list$bounds[2]) return(numeric(ncol(var_list$data) - 1))
     data = var_list$data
     message('run derivative...')
-    dist_matrix = cluster::daisy(data, metric = "gower", weights = c(x, 1 - sum(x)))
+    dist_matrix = cluster::daisy(data, metric = "gower", weights = x)
 
 
     #CHECK IF THERE ARE NO PROBLEMS WITH THE DISTANCE MATRIX
@@ -44,19 +42,19 @@ cpcc_derivative = function(x, var_list){
         }else{
             cl <- var_list$cluster
             if(!is.null(cl)){
-                return(-parallel::parSapply(cl, data[,-ncol(data)], function(x){
+                return(-parallel::parSapply(cl, data, function(x){
                     sum(fin * gower_diff(x), na.rm = T)
                 }))
             } else {
-                return(-sapply(data[,-ncol(data)], function(x){
+                return(-sapply(data, function(x){
                     sum(fin * gower_diff(x), na.rm = T)
                 }))
             }
         }
-    }else return(numeric(ncol(data) - 1))
+    }else return(numeric(ncol(data)))
 }
 
-find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1),
+find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data)),
                         n_iterate = 10, clust_method = "average",
                         bounds = c(1 / (3 * ncol(data)), 1 - (ncol(data) - 1)/(3 * ncol(data))), # this equals: [1/3n, (n-1)/3n]
                         minimal_memory_mode = FALSE, use_cluster = FALSE){
@@ -68,7 +66,7 @@ find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1)
     if (!is.logical(minimal_memory_mode))             stop("Error: minimal memory mode must be logical")
 
     #STARTING VALUES
-    if (1 - sum(start_values) < bounds[1] )           stop("Error: starting values cant sum to one. ")
+    # if (1 - sum(start_values) < bounds[1] )           stop("Error: starting values cant sum to one. ")
     if (any(start_values < 0))                        stop("Error: negative starting values")
 
     #QUASI NEWTON ARGUMENTS
@@ -82,7 +80,7 @@ find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1)
     #SETUP NECESSITIES
     method = "L-BFGS-B"
     bounds[2] = min(1 - (ncol(data) - 1) * bounds[1], bounds[2])
-    control_list = list(maxit = n_iterate, fnscale = -.001, pgtol = .05)
+    control_list = list(maxit = n_iterate, fnscale = -1, pgtol = .05, factr = 1e-7)
     var_list = list('data' = data, 'method' = clust_method, 'bounds' = bounds, 'MMM' = minimal_memory_mode)
 
     #SETUP CLUSTER
@@ -107,10 +105,10 @@ find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1)
             }
 
             #COMPUTE FK IN PARALLEL
-            fk = parallel::parLapply(c1, data, gower_diff)[1:(ncol(data)-1)]
+            fk = parallel::parLapply(c1, data, gower_diff)
         } else {
             #COMPUTE FK NOT PARALLEL
-            fk = lapply(data, gower_diff)[1:(ncol(data)-1)]
+            fk = lapply(data, gower_diff)
         }
         var_list$fk <- fk
         print("Finished computing Fk(i,j)...")
@@ -126,8 +124,8 @@ find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1)
 
     # Shut down cluster
     if(class(use_cluster) == "cluster" || (class(use_cluster) == "logical" && use_cluster == T)) parallel::stopCluster(c1)
-    RES$par = c(RES$par, 1 - sum(RES$par))
     names(RES$par) = colnames(data)
+    RES$par <- RES$par / sum(RES$par)
     # RES$value = -RES$value
     return(RES)
 }
