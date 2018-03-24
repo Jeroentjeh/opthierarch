@@ -8,7 +8,7 @@ calculate_cpcc = function(x, var_list){
 
     #CHECK IF THERE ARE NO PROBLEMS WITH THE DISTANCE MATRIX
     if (!any(is.na(dist_matrix))){
-        correlation = -cor(dist_matrix, cophenetic(hclust(dist_matrix, method = method)))
+        correlation = cor(dist_matrix, cophenetic(hclust(dist_matrix, method = method)))
     } else correlation = 0
 
     return(correlation)
@@ -40,12 +40,18 @@ cpcc_derivative = function(x, var_list){
         #COMPUTE DERIVATIVE
         if (!minimal_memory_mode) {
             fk = var_list$fk
-            return(sapply(fk, function(x)(sum(fin * x, na.rm = T))))
+            return(-sapply(fk, function(x)(sum(fin * x, na.rm = T))))
         }else{
-            return(sapply(1:(ncol(data) - 1), function(x){
-                distances = gower_diff(data[,x])
-                sum(fin * distances, na.rm = T)
-            }))
+            cl <- var_list$cluster
+            if(!is.null(cl)){
+                return(-parallel::parSapply(cl, data[,-ncol(data)], function(x){
+                    sum(fin * gower_diff(x), na.rm = T)
+                }))
+            } else {
+                return(-sapply(data[,-ncol(data)], function(x){
+                    sum(fin * gower_diff(x), na.rm = T)
+                }))
+            }
         }
     }else return(numeric(ncol(data) - 1))
 }
@@ -55,81 +61,81 @@ find_weights = function(data, start_values = rep(1 / ncol(data), ncol(data) - 1)
                         bounds = c(1 / (3 * ncol(data)), 1 - (ncol(data) - 1)/(3 * ncol(data))), # this equals: [1/3n, (n-1)/3n]
                         minimal_memory_mode = FALSE, use_cluster = FALSE){
 
-  #CHECK IF THE INPUT IS CORRECT
-  #BASIC INPUT: DATA, CORRECT TYPES, AND CLUSTER PACKAGE
-  if (!requireNamespace("cluster", quietly = T))    stop("Package cluster not installed")
-  if (!is.data.frame(data) && !is.matrix(data))     stop("Error: data was not supplied as a dataframe or matrix")
-  if (!is.logical(minimal_memory_mode))             stop("Error: minimal memory mode must be logical")
+    #CHECK IF THE INPUT IS CORRECT
+    #BASIC INPUT: DATA, CORRECT TYPES, AND CLUSTER PACKAGE
+    if (!requireNamespace("cluster", quietly = T))    stop("Package cluster not installed")
+    if (!is.data.frame(data) && !is.matrix(data))     stop("Error: data was not supplied as a dataframe or matrix")
+    if (!is.logical(minimal_memory_mode))             stop("Error: minimal memory mode must be logical")
 
-  #STARTING VALUES
-  if (1 - sum(start_values) < bounds[1] )           stop("Error: starting values cant sum to one. ")
-  if (any(start_values < 0))                        stop("Error: negative starting values")
+    #STARTING VALUES
+    if (1 - sum(start_values) < bounds[1] )           stop("Error: starting values cant sum to one. ")
+    if (any(start_values < 0))                        stop("Error: negative starting values")
 
-  #QUASI NEWTON ARGUMENTS
-  if (n_iterate < 1)                                stop("Error: invalid number of iterations")
+    #QUASI NEWTON ARGUMENTS
+    if (n_iterate < 1)                                stop("Error: invalid number of iterations")
 
-  #BOUNDARY CHECKS
-  if (bounds[1] < 0)                                stop("Error: lower bound must be positive or 0")
-  if (1 - (ncol(data) - 1) * bounds[1] < bounds[1]) stop("Error: lower bound too high. It must be below or equal to 1/ncol(data)")
-  if (bounds[2] < bounds[1])                        stop("Error: lower bound must be lower than upper bound")
+    #BOUNDARY CHECKS
+    if (bounds[1] < 0)                                stop("Error: lower bound must be positive or 0")
+    if (1 - (ncol(data) - 1) * bounds[1] < bounds[1]) stop("Error: lower bound too high. It must be below or equal to 1/ncol(data)")
+    if (bounds[2] < bounds[1])                        stop("Error: lower bound must be lower than upper bound")
 
-  #SETUP NECESSITIES
-  method = "L-BFGS-B"
-  bounds[2] = min(1 - (ncol(data) - 1) * bounds[1], bounds[2])
-  control_list = list(maxit = n_iterate, fnscale = .001)
+    #SETUP NECESSITIES
+    method = "L-BFGS-B"
+    bounds[2] = min(1 - (ncol(data) - 1) * bounds[1], bounds[2])
+    control_list = list(maxit = n_iterate, fnscale = -.001, pgtol = .05)
+    var_list = list('data' = data, 'method' = clust_method, 'bounds' = bounds, 'MMM' = minimal_memory_mode)
 
-  #START
-  if (!minimal_memory_mode){
-    print("Computing Fk(i,j)...")
+    #SETUP CLUSTER
+    if (class(use_cluster) != "cluster")
+        c1 = parallel::makeCluster(parallel::detectCores() - 1, type = "FORK")
+    else c1 = use_cluster
+    if(use_cluster[1] != F) {
+        var_list$cluster <- c1
+    }
 
-      if (class(use_cluster) == "cluster" || (class(use_cluster) == "logical" && use_cluster == T)){
-          print("Using cluster...")
-          if(!requireNamespace("parallel", quietly = T)) stop("Package parallel not installed")
+    #START
+    if (!minimal_memory_mode){
+        print("Computing Fk(i,j)...")
 
-          #SETUP CLUSTER
-          if (class(use_cluster) != "cluster")
-              c1 = parallel::makeCluster(parallel::detectCores() - 1, type = "FORK")
-          else c1 = use_cluster
+        if (class(use_cluster) == "cluster" || (class(use_cluster) == "logical" && use_cluster == T)){
+            print("Using cluster...")
+            if(!requireNamespace("parallel", quietly = T)) stop("Package parallel not installed")
 
-          if (class(use_cluster) == "SOCKcluster"){
-              parallel::clusterExport(cl = c1, varlist = "data", envir = environment())
-          }
 
-          #COMPUTE FK IN PARALLEL
-          fk = parallel::parSapply(c1, 1:(ncol(data) - 1),
-                    function(x) cluster::daisy(as.data.frame(data[,x]), metric  = "gower"), simplify = F)
-          parallel::stopCluster(c1)
+            if (class(use_cluster) == "SOCKcluster"){
+                parallel::clusterExport(cl = c1, varlist = "data", envir = environment())
+            }
 
+            #COMPUTE FK IN PARALLEL
+            fk = parallel::parLapply(c1, data, gower_diff)[1:(ncol(data)-1)]
         } else {
-          #COMPUTE FK NOT PARALLEL
-          fk = sapply(1:(ncol(data) - 1),
-                    function(x) cluster::daisy(as.data.frame(data[,x]), metric = "gower"))
-          fk = split(fk, ceiling(seq_along(fk) / (length(fk) / (ncol(data) - 1))))
+            #COMPUTE FK NOT PARALLEL
+            fk = lapply(data, gower_diff)[1:(ncol(data)-1)]
         }
+        var_list$fk <- fk
         print("Finished computing Fk(i,j)...")
         print("Starting optimization...")
-        var_list = list(data, clust_method, bounds, minimal_memory_mode, fk)
-        names(var_list) = c("data", "method", "bounds", "MMM", "fk")
         RES = optim(par = start_values, fn = calculate_cpcc, gr = cpcc_derivative, var_list, control = control_list,
                     method = method, lower = bounds[1], upper = bounds[2], hessian = F)
         rm(fk)
-  }else {
-      print("Starting optimization...")
-      var_list = list(data, clust_method, bounds, minimal_memory_mode)
-      names(var_list) = c("data", "method", "bounds", "MMM")
-      RES = optim(par = start_values, fn = calculate_cpcc, gr = cpcc_derivative, var_list, control = control_list, method = method,
-                  lower = bounds[1], upper = bounds[2], hessian = F)
-  }
-  RES$par = c(RES$par, 1 - sum(RES$par))
-  names(RES$par) = colnames(data)
-  RES$value = -RES$value
-  return(RES)
+    }else {
+        print("Starting optimization...")
+        RES = optim(par = start_values, fn = calculate_cpcc, gr = cpcc_derivative, var_list, control = control_list, method = method,
+                    lower = bounds[1], upper = bounds[2], hessian = F)
+    }
+
+    # Shut down cluster
+    if(class(use_cluster) == "cluster" || (class(use_cluster) == "logical" && use_cluster == T)) parallel::stopCluster(c1)
+    RES$par = c(RES$par, 1 - sum(RES$par))
+    names(RES$par) = colnames(data)
+    # RES$value = -RES$value
+    return(RES)
 }
 
 opt_hierarchical = function(data, start_values = rep(1/ncol(data), ncol(data)-1),
-                          n_iterate = 10, clust_method = "average",
-                          bounds = c(1 / (3 * ncol(data)), 1 - (ncol(data) - 1)/(3 * ncol(data))), # this equals: [1/3n, (n-1)/3n]
-                          minimal_memory_mode = FALSE, use_cluster = FALSE){
+                            n_iterate = 10, clust_method = "average",
+                            bounds = c(1 / (3 * ncol(data)), 1 - (ncol(data) - 1)/(3 * ncol(data))), # this equals: [1/3n, (n-1)/3n]
+                            minimal_memory_mode = FALSE, use_cluster = FALSE){
 
     #WRAPPER FOR FIND_WEIGHTS: RETURNS A HCLUST OBJECT AND THE RESULTS OF FIND_WEIGHTS.
     if(!requireNamespace("cluster",quietly = T))    stop("Package cluster not installed")

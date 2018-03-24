@@ -1,6 +1,6 @@
 gower_diff <- function(col){
+    N <- length(col)
     if(is.numeric(col) || is.logical(col)){
-        N <- length(col)
         x <- sapply(seq_len(length(col) - 1), function(y) {
             return(col[y] - col[(y+1):N])
         })
